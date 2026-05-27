@@ -84,13 +84,19 @@ DATE is decoded-time value."
        (goto-char (point-min))
        (while (re-search-forward org-tsr-regexp nil t)
 	 (if (save-match-data
-	       (or (org-entry-is-done-p)
-		   (progn
-		     (setq tags
-			   (mapcar #'substring-no-properties
-				   (org-get-tags)))
-		     (member org-archive-tag tags))))
-	     (org-get-next-sibling)
+	       (condition-case nil
+		   (or (org-before-first-heading-p)
+		       (org-entry-is-done-p)
+		       (progn
+			 (setq tags
+			       (mapcar #'substring-no-properties
+				       (org-get-tags)))
+			 (member org-archive-tag tags)))
+		 (error t)))
+	     (unless (save-match-data
+		       (and (not (org-before-first-heading-p))
+			    (org-get-next-sibling)))
+	       (outline-next-heading))
 	   (when-let
 	       ((timestamp-and-type
 		 (save-excursion
@@ -176,18 +182,24 @@ without time."
 	   (org-timeblock-date<= end-ts to))))))
    org-timeblock-cache))
 
+(defun org-timeblock--find-buffer (file)
+  "Get or create a buffer visiting FILE, reusing existing buffers.
+Inhibits org startup and suppresses window changes like `org-agenda' does."
+  (or (find-buffer-visiting file)
+      (let ((org-inhibit-startup t))
+        (find-file-noselect file t))))
+
 (defun org-timeblock-update-cache ()
   "Update org-timeblock-cache.
 Return nil if buffers are up-to-date."
+  (save-window-excursion
   (when-let
       ((buffers-to-update
 	(mapcar
-	 #'find-file-noselect
-	 ;; This code is partially borrowed from `org-ql--select-cached'
-	 ;; function which is part of org-ql project written by Adam Porter
+	 #'org-timeblock--find-buffer
 	 (seq-filter
 	  (lambda (file)
-	    (let* ((buffer (find-file-noselect file))
+	    (let* ((buffer (org-timeblock--find-buffer file))
 		   (modified-tick
 		    (alist-get file org-timeblock-buffers nil nil #'equal))
 		   (new-modified-tick (buffer-chars-modified-tick buffer)))
@@ -209,7 +221,7 @@ Return nil if buffers are up-to-date."
 	     #'org-timeblock-get-buffer-entries-all
 	     buffers-to-update))
 	   #'org-timeblock-timestamp<))
-    t))
+    t)))
 
 (defun org-timeblock-get-colors (tags)
   "Return face for TAGS."
